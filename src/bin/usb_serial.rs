@@ -9,6 +9,7 @@ use stm32f4xx_hal::{
     stm32,
 };
 use usb_device::prelude::*;
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
@@ -49,14 +50,48 @@ fn main() -> ! {
 
     let usb_bus = UsbBus::new(usb, unsafe { &mut EP_MEMORY });
 
+    let mut serial = SerialPort::new(&usb_bus);
+
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
         .manufacturer("Fake Company")
         .product("Serial Port")
         .serial_number("TEST")
-        .device_class(0)
+        .device_class(USB_CLASS_CDC)
         .build();
 
     loop {
-        if usb_dev.poll(&mut []) {}
+        if !usb_dev.poll(&mut [&mut serial]) {
+            continue;
+        }
+
+        let mut buffer = [0u8; 64];
+
+        match serial.read(&mut buffer) {
+            Ok(count) if count > 0 => {
+                // Turn on the LED
+                led.set_high().unwrap();
+
+                // Echo back in upper case
+                for c in buffer[0..count].iter_mut() {
+                    if 0x61 <= *c && *c <= 0x7a {
+                        *c &= !0x20;
+                    }
+                }
+
+                let mut write_offset = 0;
+                while write_offset < count {
+                    match serial.write(&buffer[write_offset..count]) {
+                        Ok(len) if len > 0 => {
+                            write_offset += len;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Turn off the LED
+        led.set_low().unwrap();
     }
 }
