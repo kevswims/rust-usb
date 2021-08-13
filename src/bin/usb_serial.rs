@@ -3,8 +3,14 @@
 
 use rust_usb as _; // global logger + panicking-behavior + memory layout
 
-use stm32f4xx_hal::{prelude::*, stm32};
-use cortex_m::asm::nop;
+use stm32f4xx_hal::{
+    otg_fs::{UsbBus, USB},
+    prelude::*,
+    stm32,
+};
+use usb_device::prelude::*;
+
+static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -12,7 +18,7 @@ fn main() -> ! {
 
     let rcc = dp.RCC.constrain();
 
-    let _clocks = rcc
+    let clocks = rcc
         .cfgr
         .use_hse(8.mhz())
         .sysclk(48.mhz())
@@ -27,9 +33,30 @@ fn main() -> ! {
     // Turn the LED off
     led.set_low().unwrap();
 
-    defmt::info!("Hello, world!");
+    let gpioa = dp.GPIOA.split();
+
+    let usb_dm = gpioa.pa11.into_alternate_af10();
+    let usb_dp = gpioa.pa12.into_alternate_af10();
+
+    let usb = USB {
+        usb_global: dp.OTG_FS_GLOBAL,
+        usb_device: dp.OTG_FS_DEVICE,
+        usb_pwrclk: dp.OTG_FS_PWRCLK,
+        pin_dm: usb_dm,
+        pin_dp: usb_dp,
+        hclk: clocks.hclk(),
+    };
+
+    let usb_bus = UsbBus::new(usb, unsafe { &mut EP_MEMORY });
+
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+        .manufacturer("Fake Company")
+        .product("Serial Port")
+        .serial_number("TEST")
+        .device_class(0)
+        .build();
 
     loop {
-        nop();
+        if usb_dev.poll(&mut []) {}
     }
 }
